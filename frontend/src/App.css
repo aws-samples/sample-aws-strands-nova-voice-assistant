@@ -1,0 +1,18 @@
+/* Remove default App styles since we're using Cloudscape layout */
+.App {
+  text-align: left;
+}
+
+/* Ensure full height for the layout */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom styles for the voice assistant */
+.voice-assistant-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}

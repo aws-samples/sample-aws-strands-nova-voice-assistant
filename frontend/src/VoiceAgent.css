@@ -1,0 +1,212 @@
+.voice-agent {
+    width: 100%;
+    padding: 20px;
+}
+
+.voice-agent .session-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.voice-agent .chat-history-option {
+    margin-top: 10px;
+}
+
+.voice-agent .chat-history-option .desc {
+    display: block;
+    font-size: small;
+    color: gray;
+    margin-top: 4px;
+}
+
+.voice-agent .chat-area {
+    height: 500px;
+    background-color: #f5f4f4;
+    overflow-y: auto;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+}
+
+.voice-agent .events-area {
+    height: 500px;
+    background-color: #f5f4f4;
+    overflow-y: auto;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+}
+
+.voice-agent .chat-area .chat-item { 
+    position: relative; 
+    width: 100%; 
+    padding: 10px; 
+    overflow: hidden; 
+    display: flex;
+    margin-bottom: 10px;
+}
+
+.voice-agent .chat-area .chat-item.user {
+    justify-content: flex-end;
+}
+
+.voice-agent .chat-area .chat-item.bot {
+    justify-content: flex-start;
+}
+
+.voice-agent .chat-area .message-bubble.user-message { 
+    background-color: #b1dafc; 
+    max-width: 60%; 
+    padding: 12px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    word-wrap: break-word;
+}
+
+.voice-agent .chat-area .message-bubble.bot-message { 
+    background-color: #bbdfbc; 
+    max-width: 60%; 
+    padding: 12px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    word-wrap: break-word;
+}
+
+.voice-agent .chat-area .loading-bubble {
+    background-color: #bbdfbc; 
+    padding: 8px 20px;
+    border-radius: 20px;
+    display: inline-block;
+    position: relative;
+}
+
+.voice-agent .chat-area .loading-dots {
+    display: inline-block;
+}
+
+.voice-agent .chat-area .loading-dots span {
+    width: 8px;
+    height: 8px;
+    background-color: #666;
+    border-radius: 50%;
+    display: inline-block;
+    margin: 0 2px;
+    animation: bounce 1.4s infinite ease-in-out;
+}
+
+.voice-agent .chat-area .loading-dots span:nth-child(1) { 
+    animation-delay: -0.32s; 
+}
+
+.voice-agent .chat-area .loading-dots span:nth-child(2) { 
+    animation-delay: -0.16s; 
+}
+
+.voice-agent .chat-area .end-marker {
+    display: block;
+    height: 1px;
+}
+
+@keyframes bounce {
+    0%, 80%, 100% { 
+        transform: scale(0); 
+    }
+    40% { 
+        transform: scale(1); 
+    }
+}
+
+/* Event display styles */
+.voice-agent .events-area .event-in {
+    position: relative;
+    display: block;
+    padding: 10px;
+    color: white;
+    cursor: pointer;
+    background-color: #4CAF50; 
+    border-radius: 10px;
+    width: 70%;
+    margin: 5px 0;
+    margin-left: auto;
+    font-weight: bold;
+    word-wrap: break-word;
+}
+
+.voice-agent .events-area .event-out {
+    position: relative;
+    display: block;
+    padding: 10px;
+    background-color: #277aee; 
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 10px;
+    width: 70%;
+    margin: 5px 0;
+    word-wrap: break-word;
+}
+
+.voice-agent .events-area .event-tool {
+    position: relative;
+    display: block;
+    padding: 10px;
+    background-color: #ee6927; 
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 10px;
+    width: 70%;
+    margin: 5px 0;
+    margin-left: auto;
+    word-wrap: break-word;
+}
+
+.voice-agent .events-area .event-int {
+    position: relative;
+    display: block;
+    padding: 10px;
+    background-color: #cc7b01; 
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 10px;
+    width: 80%;
+    margin: 5px auto;
+    word-wrap: break-word;
+}
+
+.voice-agent .events-area .tooltip {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background-color: #fff;
+    border: 1px solid #000;
+    padding: 10px;
+    white-space: pre-wrap;
+    width: 300px;
+    max-height: 400px;
+    overflow-y: auto;
+    box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
+    z-index: 10000;
+    color: black;
+}
+
+.eventdetail {
+    overflow: auto;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .voice-agent .chat-area .message-bubble.user-message,
+    .voice-agent .chat-area .message-bubble.bot-message {
+        max-width: 80%;
+    }
+    
+    .voice-agent .events-area .event-in,
+    .voice-agent .events-area .event-out,
+    .voice-agent .events-area .event-tool {
+        width: 90%;
+    }
+}
