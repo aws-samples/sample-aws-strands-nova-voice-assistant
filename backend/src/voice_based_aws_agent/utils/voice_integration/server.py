@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple WebSocket server based on nova-s2s-workshop
+Simple WebSocket server
 """
 
 import asyncio
