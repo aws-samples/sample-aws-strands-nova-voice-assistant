@@ -166,7 +166,6 @@ Options:
   --voice TEXT       Voice ID for responses (choices: matthew, tiffany, amy; default: matthew)
   --host TEXT        WebSocket server host (default: localhost)
   --port INTEGER     WebSocket server port (default: 80)
-  --text-mode        Use text input/output instead of voice (for testing)
   --help            Show help message
 ```
 
@@ -272,9 +271,6 @@ Ensure your AWS credentials have permissions for:
 
 # Use specific AWS profile
 ./run_backend.sh --profile <your-profile-name>
-
-# Text mode for testing (no voice)
-./run_backend.sh --text-mode
 
 # Custom configuration
 ./run_backend.sh --profile <your-profile-name> --region <your-region> --port 3001 --voice tiffany

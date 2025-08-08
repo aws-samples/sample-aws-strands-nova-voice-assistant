@@ -13,8 +13,8 @@ class AgentConfig:
     model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     region: str = "us-east-1"
     profile_name: str = None
-    temperature: float = 0.3
-    max_tokens: int = 4096
+    temperature: float = 0.0
+    max_tokens: int = 2048  # Recommended max tokens for better responses
     request_timeout: int = 300  # Timeout in seconds for API requests
 
     def __post_init__(self):

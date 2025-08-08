@@ -49,11 +49,6 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8080, help="WebSocket server port (default: 8080)"
     )
-    parser.add_argument(
-        "--text-mode",
-        action="store_true",
-        help="Use text input/output instead of voice (for testing)",
-    )
 
     args = parser.parse_args()
 
@@ -67,14 +62,8 @@ def main():
     logger.info(f"AWS Region: {args.region}")
     logger.info(f"Voice: {args.voice}")
     logger.info(f"Server: {args.host}:{args.port}")
-    logger.info(f"Text Mode: {args.text_mode}")
     logger.info(f"Frontend: http://localhost:3000")
     logger.info("=" * 60)
-
-    if args.text_mode:
-        logger.info("Text mode not implemented in simplified version")
-        logger.info("Please use the web interface at http://localhost:3000")
-        return
 
     try:
         # Run the server
