@@ -23,7 +23,7 @@ def debug_print(message):
 
 
 class S2sSessionManager:
-    """Simple S2S Session Manager based on nova-s2s-workshop"""
+    """Simple S2S Session Manager """
     
     def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1', config=None):
         """Initialize the stream manager."""
