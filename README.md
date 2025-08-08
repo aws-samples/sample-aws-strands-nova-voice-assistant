@@ -278,9 +278,6 @@ Ensure your AWS credentials have permissions for:
 ## 🧪 Development
 
 ### Architecture Notes
-
-This version is based on the proven nova-s2s-workshop approach for maximum reliability:
-
 - **Simple session management** without complex recovery mechanisms
 - **Basic WebSocket server** without automatic reconnection loops
 - **Straightforward tool processing** with the supervisor agent
