@@ -9,7 +9,6 @@ A sophisticated voice-based AI assistant using AWS Strands for multi-agent colla
 - **AWS Service Integration**: Comprehensive support for EC2, SSM, and AWS Backup operations
 - **Intelligent Routing**: Automatic query routing to appropriate specialized agents
 - **Professional UI**: AWS Cloudscape Design components with chat bubbles and event display
-- **Simplified Architecture**: Based on proven nova-s2s-workshop approach for reliability
 
 ## Authors and acknowledgment
 We would like to thank the following contributors for their valuable input and work on this project _(sorted alphabetically)_:
