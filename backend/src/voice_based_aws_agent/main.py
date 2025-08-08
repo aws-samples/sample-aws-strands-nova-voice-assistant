@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Main entry point for the AWS Strands Nova Voice Assistant.
-Simplified version based on nova-s2s-workshop.
 """
 
 import asyncio
