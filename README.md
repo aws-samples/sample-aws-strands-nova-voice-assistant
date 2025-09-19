@@ -81,6 +81,84 @@ aws-strands-nova-voice-assistant/
 └── README.md                          # This file
 ```
 
+## 💰 Detailed Cost Breakdown
+
+Running this voice-driven AWS assistant involves several AWS services with usage-based pricing. Here's a comprehensive breakdown for planning and budgeting:
+
+### Amazon Nova Sonic (Speech-to-Speech)
+- **Speech input tokens**: $0.0034 per 1K tokens
+- **Speech output tokens**: $0.0136 per 1K tokens  
+- **Text input tokens**: $0.00006 per 1K tokens
+- **Text output tokens**: $0.00024 per 1K tokens
+
+### AWS Bedrock Claude 3 Haiku
+- **Input tokens**: $0.00025 per 1K tokens
+- **Output tokens**: $0.00025 per 1K tokens
+
+### Supporting AWS Services
+
+**Amazon EC2 (for testing/demo instances)**
+- **t3.micro Linux**: $0.0104 per hour (~$7.49/month if running 24/7)
+- **Most users run instances only during testing**
+
+**AWS Systems Manager**
+- **Basic operations**: Free tier available
+- **Advanced parameters**: $0.05 per parameter per month
+- **Data transfer**: $0.90 per GB (rarely needed for typical usage)
+
+**AWS Backup**
+- **Storage**: ~$0.05 per GB per month (standard warm storage)
+- **Cross-region data transfer**: $0.02 per GB
+- **Restore operations**: $0.02 per GB
+
+### Usage-Based Cost Examples
+
+**Light Development Usage** (2-3 hours/day, 5 days/week)
+- **Voice interactions**: ~50 conversations/week
+- **Average conversation**: 4-6 exchanges
+- **Estimated monthly cost**: $8-15
+
+**Moderate Testing** (Daily usage, multiple team members)
+- **Voice interactions**: ~200 conversations/week
+- **Extended conversations**: 8-10 exchanges each
+- **Estimated monthly cost**: $25-45
+
+**Heavy Development** (Continuous testing, multiple environments)
+- **Voice interactions**: ~500+ conversations/week
+- **Complex operations**: Long-running AWS tasks
+- **Estimated monthly cost**: $60-100+
+
+### Cost Optimization Features
+
+The solution includes several built-in cost controls:
+- **Voice response truncation**: Limited to 800 characters to reduce token usage
+- **Efficient agent routing**: Minimizes unnecessary LLM calls
+- **Conversation management**: Sliding window to control context size
+- **Free tier utilization**: Leverages AWS free tier services where available
+
+### Cost Factors That Impact Pricing
+
+1. **Conversation Length**: Longer conversations consume more tokens
+2. **Voice vs Text**: Voice processing costs more than text-only interactions
+3. **AWS Operations**: Complex operations requiring multiple API calls
+4. **Instance Usage**: EC2 instances for testing (can be stopped when not needed)
+5. **Backup Storage**: Depends on data volume being backed up
+
+### Production Considerations
+
+For production deployments, additional costs may include:
+- **Load balancing**: Application Load Balancer (~$16/month)
+- **High availability**: Multi-AZ deployments
+- **Monitoring**: CloudWatch logs and metrics
+- **Security**: WAF, additional IAM roles
+- **Scaling**: Auto Scaling groups and larger instance types
+
+**Important Notes:**
+- Pricing shown is for US East (N. Virginia) region as of August 2025
+- Actual costs depend heavily on usage patterns and conversation frequency
+- The voice-optimized design helps keep token usage predictable
+- Consider using AWS Cost Explorer and budgets for monitoring
+
 ## 🛠️ Prerequisites
 
 - **Python 3.12+** with pip
@@ -92,11 +170,16 @@ aws-strands-nova-voice-assistant/
 - **AWS CLI** configured with appropriate credentials
 - **Audio hardware** (microphone and speakers for voice mode)
 
-## 📦 Installation
+## 📦 Installation & Implementation Guide
 
-### Backend Setup
+### Step 1: Backend Setup
 
+**Clone and prepare the environment:**
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd sample-aws-strands-nova-voice-assistant
+
 # Create and activate virtual environment
 python -m venv .venv
 source .venv/bin/activate  # On Unix/macOS
@@ -107,31 +190,153 @@ source .venv/bin/activate  # On Unix/macOS
 pip install -r requirements.txt
 ```
 
-### AWS Credentials Configuration
+### Step 2: Configure AWS Service Authentication
 
 This application uses two different AWS authentication mechanisms:
 
-1. **Nova Sonic Integration**: Requires AWS credentials as environment variables
-2. **Other AWS Services**: Uses boto3 with AWS profiles
+**Nova Sonic Integration**: Requires AWS credentials as environment variables
+**Other AWS Services**: Uses boto3 with AWS profiles
 
-**Set up environment variables (required for Nova Sonic):**
-
+**Set up AWS credentials for Nova Sonic (required as environment variables):**
 ```bash
-# Set AWS credentials as environment variables (required for Nova Sonic)
 export AWS_ACCESS_KEY_ID=<your-access-key-id>
 export AWS_SECRET_ACCESS_KEY=<your-secret-access-key>
 export AWS_SESSION_TOKEN=<your-session-token>  # Only if using temporary credentials
-
-# Optional: Set default region
 export AWS_DEFAULT_REGION=<your-region>
 ```
 
-**Important Notes:**
-- The Nova Sonic integration uses `EnvironmentCredentialsResolver` which requires credentials as environment variables
-- The `--profile` parameter in `./run_backend.sh` is used by boto3 for other AWS service calls (EC2, SSM, Backup)
-- Both authentication methods are required for the application to work properly
+**Configure AWS CLI profile for other services:**
+```bash
+aws configure --profile <your-profile-name>
+# Enter your AWS Access Key ID, Secret Access Key, and default region
+```
 
-### Frontend Setup
+**Apply the required IAM permissions to your AWS user/role:**
+- Amazon Bedrock model invocation
+- EC2 instance management  
+- SSM operations
+- AWS Backup functionality
+- Supporting services (KMS, STS)
+
+**Test your configuration:**
+```bash
+# Test AWS CLI access
+aws sts get-caller-identity --profile <your-profile-name>
+
+# Test environment variables
+echo $AWS_ACCESS_KEY_ID
+```
+
+**Security Note**: Follow the principle of least privilege - grant only permissions needed for your specific use case. Customize the provided IAM policy based on which AWS services you plan to use with the voice assistant.
+
+AWS Permissions Example:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "BedrockPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+                "bedrock:GetFoundationModel",
+                "bedrock:ListFoundationModels"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2ReadPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeImages",
+                "ec2:DescribeVpcs",
+                "ec2:DescribeInstanceStatus"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2WritePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:StartInstances",
+                "ec2:StopInstances",
+                "ec2:RebootInstances"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SSMReadPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:DescribeInstanceInformation",
+                "ssm:GetCommandInvocation",
+                "ssm:ListCommands",
+                "ssm:ListCommandInvocations",
+                "ssm:DescribeDocument",
+                "ssm:ListDocuments"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SSMWritePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:SendCommand",
+                "ssm:StartSession",
+                "ssm:CreateDocument"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BackupReadPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "backup:ListBackupJobs",
+                "backup:DescribeBackupVault",
+                "backup:ListBackupPlans",
+                "backup:ListBackupVaults",
+                "backup:DescribeBackupJob"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BackupWritePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "backup:CreateBackupVault",
+                "backup:CreateBackupPlan",
+                "backup:StartBackupJob",
+                "backup:StartRestoreJob"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BackupStoragePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "backup-storage:StartObject",
+                "backup-storage:PutObject",
+                "backup-storage:ListObjects"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SupportingPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "kms:DescribeKey",
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+### Step 3: Frontend Setup
 
 ```bash
 # Navigate to frontend directory
@@ -141,35 +346,18 @@ cd frontend
 npm install
 ```
 
-## 🚀 Usage
+### Step 4: Launch the Application
 
-### Starting the Backend Server
-
+**Start the backend server:**
 ```bash
 # From the project root (recommended)
 ./run_backend.sh
 
-# Or manually:
-cd backend
-python -m src.voice_based_aws_agent.main
+# Or with custom parameters:
+./run_backend.sh --profile <your-profile> --region <your-region> --voice matthew
 ```
 
-### Command Line Options
-
-```bash
-python -m src.voice_based_aws_agent.main [OPTIONS]
-
-Options:
-  --profile TEXT     AWS profile name (default: uses AWS_PROFILE env var or "default")
-  --region TEXT      AWS region (default: <your-default-region>)
-  --voice TEXT       Voice ID for responses (choices: matthew, tiffany, amy; default: matthew)
-  --host TEXT        WebSocket server host (default: localhost)
-  --port INTEGER     WebSocket server port (default: 80)
-  --help            Show help message
-```
-
-### Starting the Frontend
-
+**Start the frontend in a new terminal:**
 ```bash
 # Development mode (recommended)
 ./run_frontend.sh
@@ -177,6 +365,16 @@ Options:
 # Or manually:
 cd frontend
 npm start
+```
+
+### Step 5: Configure Voice Settings (Optional)
+
+The system supports multiple voice options for text-to-speech:
+```bash
+# Use different voice options
+./run_backend.sh --voice matthew  # Default male voice
+./run_backend.sh --voice tiffany  # Female voice option
+./run_backend.sh --voice amy      # Alternative female voice
 ```
 
 ### Using the Application
@@ -219,72 +417,41 @@ npm start
 - Monitor backup status
 - Restore operations
 
-## 🔧 Configuration
+## Cleanup
+To avoid ongoing charges, clean up your resources when you're done testing:
+- Terminate any test instances created during the demo
+- Remove the custom IAM roles and policies created for this solution
+- Remove any backup plans or vaults created while testing
+- Delete any snapshots or AMI’s created during the tests
 
-### Environment Variables
+## 🛠️ Troubleshooting
 
-```bash
-# AWS Configuration
-export AWS_PROFILE=<your-profile-name>
-export AWS_DEFAULT_REGION=<your-region>
+If you encounter issues during setup or operation, these common solutions can help resolve most problems:
 
-# Tool Consent (for automated operation)
-export BYPASS_TOOL_CONSENT=true
-```
+### Audio Configuration
+- Ensure microphone permissions are granted in the browser
+- Try using Firefox for better Web Audio API compatibility
+- Verify system audio settings are configured correctly
 
-### AWS Permissions
+### WebSocket Connection Issues
+- Verify the backend server is running on the correct port
+- Check firewall settings for WebSocket traffic
+- Ensure the frontend WebSocket URL matches the backend configuration
 
-Ensure your AWS credentials have permissions for:
-- `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`
-- `bedrock:GetFoundationModel` and `bedrock:ListFoundationModels`
-- EC2, SSM, and Backup service permissions as needed
+### AWS Service Permissions
+- Verify IAM policies include necessary service permissions
+- Check AWS CLI configuration and credentials
+- Ensure the AWS profile has access to required regions
 
-## 🐛 Troubleshooting
+## 🔧 Development Notes
 
-### Voice Integration Issues
-
-**Audio not working in browser:**
-- Grant microphone and speaker permissions
-- Try Firefox instead of Chrome (better compatibility)
-- Check browser console for AudioWorklet errors
-- Ensure system audio is working
-
-**Connection issues:**
-- Ensure backend server is running on correct port
-- Check WebSocket connection URL matches backend port
-- Verify AWS credentials and permissions
-
-### Common Issues
-
-1. **Port permission denied**: If you get permission errors, ensure you're using an unprivileged port (default is now 8080)
-2. **Model access errors**: Ensure your AWS profile has Bedrock permissions
-3. **WebSocket connection failed**: Check if backend server is running and port matches
-4. **Audio initialization failed**: Click anywhere on the page to activate audio context
-5. **Tool calling issues**: Verify `BYPASS_TOOL_CONSENT=true` is set
-
-### Example Commands
-
-```bash
-# Run backend on default port (8080, no sudo required)
-./run_backend.sh
-
-# Use specific AWS profile
-./run_backend.sh --profile <your-profile-name>
-
-# Custom configuration
-./run_backend.sh --profile <your-profile-name> --region <your-region> --port 3001 --voice tiffany
-```
-
-## 🧪 Development
-
-### Architecture Notes
+### Architecture Design
 - **Simple session management** without complex recovery mechanisms
 - **Basic WebSocket server** without automatic reconnection loops
 - **Straightforward tool processing** with the supervisor agent
 - **Clean error handling** that asks users to restart rather than automatic recovery
 
 ### Key Design Decisions
-
 - **Single Tool**: Uses one `supervisorAgent` tool that routes to specialized agents
 - **Voice Optimization**: Responses truncated to 800 characters for better voice experience
 - **User-Controlled Recovery**: When errors occur, users manually restart conversations
@@ -315,6 +482,5 @@ For issues and questions:
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License
-
 This library is licensed under the MIT-0 License. See the LICENSE file.
 
