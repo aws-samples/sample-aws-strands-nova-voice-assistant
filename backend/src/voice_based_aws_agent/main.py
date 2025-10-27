@@ -9,6 +9,10 @@ import os
 import sys
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+#load environment variables
+load_dotenv()
 
 # Add the current directory to Python path
 current_dir = Path(__file__).parent
