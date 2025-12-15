@@ -16,4 +16,4 @@ echo "🚀 Starting Voice-based AWS Agent..."
 
 # Run the backend server
 cd backend
-python -m src.voice_based_aws_agent.main "$@"
+uv run python -m src.voice_based_aws_agent.main "$@"
