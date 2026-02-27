@@ -177,7 +177,7 @@ For production deployments, additional costs may include:
 **Clone and prepare the environment:**
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/aws-samples/sample-aws-strands-nova-voice-assistant.git
 cd sample-aws-strands-nova-voice-assistant
 
 # Create and activate virtual environment
@@ -482,5 +482,5 @@ For issues and questions:
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License
-This library is licensed under the MIT-0 License. See the LICENSE file.
 
+This library is licensed under the MIT-0 License. See the LICENSE file.
