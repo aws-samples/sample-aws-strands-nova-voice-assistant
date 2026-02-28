@@ -5,8 +5,6 @@ Provides the interface between Nova Sonic and the multi-agent system.
 
 import asyncio
 import logging
-from typing import Annotated
-from pydantic import Field
 from strands import tool
 
 # Configure logging
@@ -56,7 +54,7 @@ async def process_query_async(query: str) -> str:
 
 @tool(name="supervisorAgent")
 def process_aws_query(
-    query: Annotated[str, Field(description="The user query about AWS services or operations")]
+    query: str,
 ) -> str:
     """
     Process AWS operations through specialized agents for EC2, Backup, and SSM.
