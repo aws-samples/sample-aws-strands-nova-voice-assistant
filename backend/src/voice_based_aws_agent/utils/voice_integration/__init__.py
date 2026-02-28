@@ -1,15 +1,12 @@
 """
-Voice integration package for Amazon Nova Sonic.
+Voice integration package for BidiAgent.
 """
 
-from .s2s_events import S2sEvent
-from .s2s_session_manager import S2sSessionManager
-from .supervisor_agent_integration import SupervisorAgentIntegration
+from .bidi_channels import WebSocketBidiInput, WebSocketBidiOutput
 from .server import run_server
 
 __all__ = [
-    'S2sEvent',
-    'S2sSessionManager',
-    'SupervisorAgentIntegration',
-    'run_server'
+    'WebSocketBidiInput',
+    'WebSocketBidiOutput',
+    'run_server',
 ]

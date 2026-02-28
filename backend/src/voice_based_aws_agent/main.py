@@ -1,39 +1,32 @@
 #!/usr/bin/env python3
-"""
-Main entry point for the AWS Strands Nova Voice Assistant.
-"""
+"""CLI entry point for the BidiAgent voice-based AWS assistant."""
 
 import asyncio
 import argparse
+import logging
 import os
 import sys
-import logging
-from pathlib import Path
+
 from dotenv import load_dotenv
 
-#load environment variables
 load_dotenv()
 
-# Add the current directory to Python path
-current_dir = Path(__file__).parent
-sys.path.insert(0, str(current_dir))
+from .utils.voice_integration.server import run_server
 
-from utils.voice_integration.server import run_server
-
-# Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("VoiceAssistantMain")
 
 
 def main():
-    """Main function."""
-    parser = argparse.ArgumentParser(description="AWS Strands Nova Voice Assistant")
+    """Parse CLI arguments and start the BidiAgent WebSocket server."""
+    parser = argparse.ArgumentParser(description="AWS BidiAgent Voice Assistant")
     parser.add_argument(
         "--profile",
         default=os.getenv("AWS_PROFILE", "default"),
-        help="AWS profile name (default: uses AWS_PROFILE env var or 'default')",
+        help="AWS profile name (default: AWS_PROFILE env var or 'default')",
     )
     parser.add_argument(
         "--region",
@@ -41,47 +34,35 @@ def main():
         help="AWS region (default: us-east-1)",
     )
     parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="WebSocket server port (default: 8080)",
+    )
+    parser.add_argument(
         "--voice",
         choices=["matthew", "tiffany", "amy"],
         default="matthew",
-        help="Voice ID for responses (default: matthew)",
-    )
-    parser.add_argument(
-        "--host", default="localhost", help="WebSocket server host (default: localhost)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8080, help="WebSocket server port (default: 8080)"
+        help="Fallback voice ID if frontend does not specify one (default: matthew)",
     )
 
     args = parser.parse_args()
 
-    # Set environment variable for tool consent bypass
-    os.environ["BYPASS_TOOL_CONSENT"] = "true"
-
-    logger.info("=" * 60)
-    logger.info("AWS Strands Nova Voice Assistant")
-    logger.info("=" * 60)
-    logger.info(f"AWS Profile: {args.profile}")
-    logger.info(f"AWS Region: {args.region}")
-    logger.info(f"Voice: {args.voice}")
-    logger.info(f"Server: {args.host}:{args.port}")
-    logger.info(f"Frontend: http://localhost:3000")
-    logger.info("=" * 60)
+    logger.info("Starting BidiAgent Voice Assistant (profile=%s, region=%s, port=%s)",
+                args.profile, args.region, args.port)
 
     try:
-        # Run the server
         asyncio.run(
             run_server(
                 profile_name=args.profile,
                 region=args.region,
-                host=args.host,
                 port=args.port,
             )
         )
     except KeyboardInterrupt:
         logger.info("Voice assistant stopped by user")
     except Exception as e:
-        logger.error(f"Voice assistant failed: {e}")
+        logger.error("Voice assistant failed: %s", e)
         sys.exit(1)
 
 

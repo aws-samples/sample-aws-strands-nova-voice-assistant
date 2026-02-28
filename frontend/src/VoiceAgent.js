@@ -9,10 +9,9 @@ import {
     Header, 
     FormField, 
     Select, 
-    Checkbox,
     Grid
 } from '@cloudscape-design/components';
-import S2sEvent from './helper/s2sEvents';
+import { BidiEventHelpers } from './helper/BidiEventHelpers';
 import EventDisplay from './components/EventDisplay';
 import { base64ToFloat32Array } from './helper/audioHelper';
 import AudioPlayer from './helper/audioPlayer';
@@ -21,7 +20,7 @@ class VoiceAgent extends React.Component {
     constructor(props) {
         super(props);
         this.state = {
-            status: "loading", // null, loading, loaded
+            status: "loading",
             alert: null,
             sessionStarted: false,
             showEventJson: false,
@@ -32,20 +31,14 @@ class VoiceAgent extends React.Component {
             events: [],
             audioChunks: [],
             audioPlayPromise: null,
-            includeChatHistory: false,
+            messageCounter: 0,
+            currentTranscriptKey: null,
 
-            promptName: null,
-            textContentName: null,
-            audioContentName: null,
-
-            // S2S config items
-            configAudioInput: null,
-            configSystemPrompt: S2sEvent.DEFAULT_SYSTEM_PROMPT,
-            configAudioOutput: S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG,
             configVoiceIdOption: { label: "Matthew (en-US)", value: "matthew" },
-            websocketUrl: "ws://localhost:8080"
+            websocketUrl: "ws://localhost:8080",
+            sessionId: crypto.randomUUID(),
         };
-        
+
         // Audio processing limits for security
         this.MAX_AUDIO_CHUNK_SIZE = 64 * 1024; // 64KB max per chunk
         this.MAX_AUDIO_BUFFER_SIZE = 1024 * 1024; // 1MB max total buffer
@@ -99,162 +92,113 @@ class VoiceAgent extends React.Component {
     }
 
     handleIncomingMessage(message) {
-        const eventType = Object.keys(message?.event)[0];
-        const role = message.event[eventType]["role"];
-        const content = message.event[eventType]["content"];
-        const contentId = message.event[eventType].contentId;
-        let stopReason = message.event[eventType].stopReason;
-        const contentType = message.event[eventType].type;
         var chatMessages = this.state.chatMessages;
 
-        switch(eventType) {
-            case "textOutput": 
-                // Detect interruption
-                if (role === "ASSISTANT" && content && content.startsWith("{")) {
-                    try {
-                        const evt = JSON.parse(content);
-                        if (evt.interrupted === true) {
-                            this.cancelAudio();
-                        }
-                    } catch (e) {
-                        // Not JSON, continue normally
-                    }
-                }
-
-                if (chatMessages.hasOwnProperty(contentId)) {
-                    chatMessages[contentId].content = content;
-                    chatMessages[contentId].role = role;
-                    if (chatMessages[contentId].raw === undefined)
-                        chatMessages[contentId].raw = [];
-                    chatMessages[contentId].raw.push(message);
-                }
-                this.setState({chatMessages: chatMessages});
-                break;
-                
-            case "audioOutput":
+        switch (message.type) {
+            case "bidi_audio_stream":
                 try {
-                    const base64Data = message.event[eventType].content;
-                    
+                    const base64Data = message.data;
+
                     // Validate audio chunk size for security
                     const chunkSize = base64Data.length;
                     if (chunkSize > this.MAX_AUDIO_CHUNK_SIZE) {
                         console.warn(`Audio chunk size (${chunkSize}) exceeds maximum allowed (${this.MAX_AUDIO_CHUNK_SIZE}). Skipping chunk.`);
                         break;
                     }
-                    
+
                     // Check total buffer size
                     this.audioBufferSize += chunkSize;
                     if (this.audioBufferSize > this.MAX_AUDIO_BUFFER_SIZE) {
                         console.warn(`Total audio buffer size (${this.audioBufferSize}) exceeds maximum allowed (${this.MAX_AUDIO_BUFFER_SIZE}). Resetting buffer.`);
-                        this.audioBufferSize = chunkSize; // Reset to current chunk size
+                        this.audioBufferSize = chunkSize;
                     }
-                    
+
                     const audioData = base64ToFloat32Array(base64Data);
                     this.audioPlayer.playAudio(audioData);
                 } catch (error) {
                     console.error("Error processing audio chunk:", error);
                 }
                 break;
-                
-            case "contentStart":
-                if (contentType === "TEXT") {
-                    var generationStage = "";
-                    if (message.event.contentStart.additionalModelFields) {
-                        generationStage = JSON.parse(message.event.contentStart.additionalModelFields)?.generationStage;
-                    }
 
-                    chatMessages[contentId] = {
-                        "content": "", 
-                        "role": role,
-                        "generationStage": generationStage,
-                        "raw": [],
+            case "bidi_transcript_stream": {
+                const role = message.role;
+                const text = message.text;
+                const isFinal = message.is_final;
+
+                if (!role || text === undefined) break;
+
+                if (isFinal) {
+                    // Final transcript — create a new finalized message entry
+                    const counter = this.state.messageCounter + 1;
+                    const key = `${role}-${counter}`;
+                    chatMessages[key] = {
+                        content: text,
+                        role: role,
                     };
-                    chatMessages[contentId].raw.push(message);
-                    this.setState({chatMessages: chatMessages});
+                    this.setState({ chatMessages: chatMessages, messageCounter: counter, currentTranscriptKey: null });
+                } else {
+                    // Interim transcript — update in-progress message
+                    const currentKey = this.state.currentTranscriptKey;
+                    const key = currentKey && chatMessages[currentKey]?.role === role
+                        ? currentKey
+                        : `${role}-interim`;
+
+                    chatMessages[key] = {
+                        content: text,
+                        role: role,
+                    };
+                    this.setState({ chatMessages: chatMessages, currentTranscriptKey: key });
                 }
                 break;
-                
-            case "contentEnd":
-                if (contentType === "TEXT") {
-                    if (chatMessages.hasOwnProperty(contentId)) {
-                        if (chatMessages[contentId].raw === undefined)
-                            chatMessages[contentId].raw = [];
-                        chatMessages[contentId].raw.push(message);
-                        chatMessages[contentId].stopReason = stopReason;
-                    }
-                    this.setState({chatMessages: chatMessages});
-                }
+            }
+
+            case "bidi_interruption":
+                this.cancelAudio();
                 break;
-                
-            case "streamRecovery":
-                console.log("Stream recovery event:", message.event.streamRecovery.message);
-                // Show a recovery message with restart option
+
+            case "bidi_connection_start":
+                console.log("BidiAgent connection started", message.connection_id);
+                break;
+
+            case "bidi_connection_close":
+                console.log("BidiAgent connection closed", message.reason);
                 this.setState({
                     alert: {
                         type: "warning",
-                        message: message.event.streamRecovery.message + " Please restart your conversation.",
+                        message: message.reason || "Connection closed. Please restart your conversation.",
                         dismissible: true,
                         showRestart: true
                     }
                 });
-                
-                // Automatically end the current session to allow restart
                 if (this.state.sessionStarted) {
                     this.endSession();
                     this.setState({ sessionStarted: false });
                 }
                 break;
-                
-            case "streamStatus":
-                const status = message.event.streamStatus.status;
-                const statusMessage = message.event.streamStatus.message;
-                console.log("Stream status:", status, statusMessage);
-                
-                if (status === "reconnecting") {
-                    this.setState({
-                        alert: {
-                            type: "info",
-                            message: statusMessage,
-                            dismissible: false
-                        }
-                    });
-                } else if (status === "connected") {
-                    this.setState({
-                        alert: {
-                            type: "success",
-                            message: statusMessage,
-                            dismissible: true,
-                            showRestart: true
-                        }
-                    });
-                    
-                    // End current session to allow clean restart
-                    if (this.state.sessionStarted) {
-                        this.endSession();
-                        this.setState({ sessionStarted: false });
-                    }
-                    
-                    // Auto-dismiss success message after 5 seconds
-                    setTimeout(() => {
-                        this.setState({alert: null});
-                    }, 5000);
-                } else if (status === "error") {
-                    this.setState({
-                        alert: {
-                            type: "error",
-                            message: statusMessage,
-                            dismissible: true
-                        }
-                    });
-                    
-                    // End current session on error
-                    if (this.state.sessionStarted) {
-                        this.endSession();
-                        this.setState({ sessionStarted: false });
-                    }
-                }
+
+            case "bidi_connection_restart":
+                console.log("BidiAgent connection restarting");
                 break;
-                
+
+            case "bidi_response_start":
+                // Optionally show loading indicator
+                break;
+
+            case "bidi_response_complete":
+                // Clear loading indicator
+                break;
+
+            case "bidi_error":
+                this.setState({
+                    alert: {
+                        type: "error",
+                        message: message.message || "An error occurred.",
+                        dismissible: true,
+                        showRestart: true
+                    }
+                });
+                break;
+
             default:
                 break;
         }
@@ -274,11 +218,12 @@ class VoiceAgent extends React.Component {
             // Start session
             this.setState({
                 chatMessages: {}, 
-                events: [], 
+                events: [],
+                messageCounter: 0,
+                currentTranscriptKey: null,
             });
             if (this.eventDisplayRef.current) this.eventDisplayRef.current.cleanup();
             
-            // Init S2sSessionManager
             try {
                 if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
                     this.connectWebSocket();
@@ -295,66 +240,15 @@ class VoiceAgent extends React.Component {
     }
 
     connectWebSocket() {
-        // Connect to the S2S WebSocket server
         if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
-            const promptName = crypto.randomUUID();
-            const textContentName = crypto.randomUUID();
-            const audioContentName = crypto.randomUUID();
-            this.setState({
-                promptName: promptName,
-                textContentName: textContentName,
-                audioContentName: audioContentName
-            });
-
             this.socket = new WebSocket(this.state.websocketUrl);
             
             this.socket.onopen = () => {
                 console.log("WebSocket connected!");
                 this.setState({status: "connected"});
 
-                // Start session events
-                this.sendEvent(S2sEvent.sessionStart());
-
-                var audioConfig = S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG;
-                audioConfig.voiceId = this.state.configVoiceIdOption.value;
-
-                // Create tool configuration for supervisor agent
-                const toolConfig = {
-                    "tools": [
-                        {
-                            "toolSpec": {
-                                "name": "supervisorAgent",
-                                "description": "Routes queries to specialized agents for EC2, Backup, and SSM",
-                                "inputSchema": {
-                                    "json": JSON.stringify({
-                                        "$schema": "http://json-schema.org/draft-07/schema#",
-                                        "type": "object",
-                                        "properties": {
-                                            "query": {
-                                                "type": "string",
-                                                "description": "The user query about AWS services or operations"
-                                            }
-                                        },
-                                        "required": ["query"]
-                                    })
-                                }
-                            }
-                        }
-                    ]
-                };
-
-                this.sendEvent(S2sEvent.promptStart(promptName, audioConfig, toolConfig));
-
-                this.sendEvent(S2sEvent.contentStartText(promptName, textContentName));
-                this.sendEvent(S2sEvent.textInput(promptName, textContentName, this.state.configSystemPrompt));
-                this.sendEvent(S2sEvent.contentEnd(promptName, textContentName));
-
-                // Chat history (if enabled)
-                if (this.state.includeChatHistory) {
-                    // Add any chat history logic here if needed
-                }
-
-                this.sendEvent(S2sEvent.contentStartAudio(promptName, audioContentName));
+                // Send config message with selected voice
+                this.sendEvent(BidiEventHelpers.config(this.state.configVoiceIdOption.value, this.state.sessionId));
             };
 
             // Handle incoming messages
@@ -376,7 +270,6 @@ class VoiceAgent extends React.Component {
                     }
                 });
                 
-                // End session on WebSocket error
                 if (this.state.sessionStarted) {
                     this.endSession();
                     this.setState({ sessionStarted: false });
@@ -388,9 +281,7 @@ class VoiceAgent extends React.Component {
                 console.log("WebSocket Disconnected", event.code, event.reason);
                 this.setState({status: "disconnected"});
                 
-                // Show appropriate message based on close code
                 if (event.code === 1005) {
-                    // No status code - likely a connection drop
                     this.setState({
                         alert: {
                             type: "warning",
@@ -400,7 +291,6 @@ class VoiceAgent extends React.Component {
                         }
                     });
                 } else if (event.code !== 1000) {
-                    // Abnormal closure
                     this.setState({
                         alert: {
                             type: "error",
@@ -411,7 +301,6 @@ class VoiceAgent extends React.Component {
                     });
                 }
                 
-                // End session on WebSocket close
                 if (this.state.sessionStarted) {
                     this.endSession();
                     this.setState({ sessionStarted: false });
@@ -481,8 +370,8 @@ class VoiceAgent extends React.Component {
                         return;
                     }
 
-                    // Send audio data
-                    this.sendEvent(S2sEvent.audioInput(this.state.promptName, this.state.audioContentName, base64Data));
+                    // Send audio data using BidiEventHelpers
+                    this.sendEvent(BidiEventHelpers.audioInput(base64Data));
                 }
             };
 
@@ -505,20 +394,14 @@ class VoiceAgent extends React.Component {
             this.mediaRecorder = null;
         }
 
-        // Close WebSocket if it's open and connected
+        // Send close event and close WebSocket
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             try {
-                // Only send close events if the connection is still good
-                if (this.state.promptName) {
-                    this.sendEvent(S2sEvent.contentEnd(this.state.promptName, this.state.audioContentName));
-                    this.sendEvent(S2sEvent.promptEnd(this.state.promptName));
-                }
-                this.sendEvent(S2sEvent.sessionEnd());
+                this.sendEvent(BidiEventHelpers.close());
             } catch (error) {
-                console.warn("Error sending close events:", error);
+                console.warn("Error sending close event:", error);
             }
             
-            // Close the socket
             this.socket.close();
         }
 
@@ -532,37 +415,31 @@ class VoiceAgent extends React.Component {
         this.setState({ 
             sessionStarted: false, 
             status: "disconnected",
-            promptName: null,
-            textContentName: null,
-            audioContentName: null
         });
         
         console.log('Session ended and cleaned up');
     }
 
     renderChatMessages() {
-        const messages = Object.values(this.state.chatMessages).sort((a, b) => {
-            return (a.raw[0]?.timestamp || 0) - (b.raw[0]?.timestamp || 0);
-        });
+        const messages = Object.entries(this.state.chatMessages)
+            .map(([key, msg]) => ({ key, ...msg }))
+            .sort((a, b) => {
+                // Sort by key to maintain insertion order
+                const aNum = parseInt(a.key.split('-').pop()) || 0;
+                const bNum = parseInt(b.key.split('-').pop()) || 0;
+                return aNum - bNum;
+            });
 
-        return messages.map((message, index) => {
-            const isUser = message.role === "USER";
-            const isAssistant = message.role === "ASSISTANT";
+        return messages.map((message) => {
+            const isUser = message.role === "user";
+            const isAssistant = message.role === "assistant";
             
             if (!isUser && !isAssistant) return null;
 
             return (
-                <div key={index} className={`chat-item ${isUser ? 'user' : 'bot'}`}>
+                <div key={message.key} className={`chat-item ${isUser ? 'user' : 'bot'}`}>
                     <div className={`message-bubble ${isUser ? 'user-message' : 'bot-message'}`}>
-                        {message.content || (isAssistant && message.generationStage ? 
-                            <div className="loading-bubble">
-                                <div className="loading-dots">
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                </div>
-                            </div> : ''
-                        )}
+                        {message.content || ''}
                     </div>
                 </div>
             );
@@ -588,7 +465,6 @@ class VoiceAgent extends React.Component {
                                 variant="primary"
                                 onClick={() => {
                                     this.setState({alert: null});
-                                    // Auto-start conversation if not already started
                                     if (!this.state.sessionStarted) {
                                         this.handleSessionChange();
                                     }
@@ -631,23 +507,35 @@ class VoiceAgent extends React.Component {
 
                                 <div className="session-controls">
                                     <FormField label="Session Control">
-                                        <Button
-                                            variant={this.state.sessionStarted ? "normal" : "primary"}
-                                            onClick={this.handleSessionChange}
-                                        >
-                                            {this.state.sessionStarted ? "End Conversation" : "Start Conversation"}
-                                        </Button>
+                                        <SpaceBetween direction="horizontal" size="xs">
+                                            <Button
+                                                variant={this.state.sessionStarted ? "normal" : "primary"}
+                                                onClick={this.handleSessionChange}
+                                            >
+                                                {this.state.sessionStarted ? "End Conversation" : "Start Conversation"}
+                                            </Button>
+                                            <Button
+                                                variant="normal"
+                                                onClick={() => {
+                                                    if (this.state.sessionStarted) {
+                                                        this.endSession();
+                                                        this.cancelAudio();
+                                                        this.audioPlayer.start();
+                                                    }
+                                                    this.setState({
+                                                        sessionId: crypto.randomUUID(),
+                                                        chatMessages: {},
+                                                        messageCounter: 0,
+                                                        currentTranscriptKey: null,
+                                                        sessionStarted: false,
+                                                    });
+                                                    if (this.eventDisplayRef.current) this.eventDisplayRef.current.cleanup();
+                                                }}
+                                            >
+                                                New Session
+                                            </Button>
+                                        </SpaceBetween>
                                     </FormField>
-                                    <div className="chat-history-option">
-                                        <Checkbox
-                                            checked={this.state.includeChatHistory}
-                                            onChange={({detail}) => this.setState({includeChatHistory: detail.checked})}
-                                            disabled={this.state.sessionStarted}
-                                        >
-                                            Include chat history
-                                        </Checkbox>
-                                        <div className="desc">Maintain conversation context across sessions</div>
-                                    </div>
                                 </div>
                             </ColumnLayout>
                         </Container>

@@ -78,3 +78,6 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# Session storage
+backend/sessions/

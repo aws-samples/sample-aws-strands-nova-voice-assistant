@@ -1,176 +1,209 @@
 #!/usr/bin/env python3
-"""
-Simple WebSocket server
+"""WebSocket server for BidiAgent voice-based AWS assistant.
+
+Handles WebSocket connections from the frontend, bridging them to a BidiAgent
+that processes speech-to-text, tool execution via use_aws, and text-to-speech
+in a single bidirectional stream.
 """
 
 import asyncio
-import websockets
 import json
 import logging
+import os
+import uuid
 import warnings
-import sys
-from pathlib import Path
 
-# Add the project root to Python path
-project_root = Path(__file__).parent.parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
+import websockets
+from strands.experimental.bidi import BidiAgent
+from strands.session import FileSessionManager
+from strands_tools import use_aws
 
-from .s2s_session_manager import S2sSessionManager
-from src.voice_based_aws_agent.utils.aws_auth import get_aws_session
-from src.voice_based_aws_agent.config.config import AgentConfig
+from .bidi_channels import WebSocketBidiInput, WebSocketBidiOutput
+from ...config.config import AgentConfig, create_bidi_model
+from ...utils.prompt_consent import get_consent_instructions
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("SimpleNovaServer")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("BidiAgentServer")
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-async def websocket_handler(websocket, path, config):
-    """Handle WebSocket connections - simplified version"""
-    stream_manager = None
-    forward_task = None
-    
-    logger.info(f"New WebSocket connection from {websocket.remote_address}")
-    
-    try:
-        async for message in websocket:
-            try:
-                data = json.loads(message)
-                if 'body' in data:
-                    data = json.loads(data["body"])
-                
-                if 'event' in data:
-                    event_type = list(data['event'].keys())[0]
-                    
-                    # Initialize stream manager only once per WebSocket connection
-                    if stream_manager is None:
-                        logger.info("Initializing simple stream manager")
-                        stream_manager = S2sSessionManager(
-                            model_id='amazon.nova-sonic-v1:0',
-                            region='us-east-1',
-                            config=config
-                        )
-                        
-                        # Initialize the Bedrock stream
-                        await stream_manager.initialize_stream()
-                        
-                        # Start a task to forward responses from Bedrock to the WebSocket
-                        forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
-                    
-                    # Store prompt name and content names if provided
-                    if event_type == 'promptStart':
-                        stream_manager.prompt_name = data['event']['promptStart']['promptName']
-                    elif event_type == 'contentStart' and data['event']['contentStart'].get('type') == 'AUDIO':
-                        stream_manager.audio_content_name = data['event']['contentStart']['contentName']
-                    
-                    # Handle audio input separately
-                    if event_type == 'audioInput':
-                        # Extract audio data
-                        prompt_name = data['event']['audioInput']['promptName']
-                        content_name = data['event']['audioInput']['contentName']
-                        audio_base64 = data['event']['audioInput']['content']
-                        
-                        # Add to the audio queue
-                        stream_manager.add_audio_chunk(prompt_name, content_name, audio_base64)
-                    else:
-                        # Send other events directly to Bedrock
-                        await stream_manager.send_raw_event(data)
-                        
-            except json.JSONDecodeError:
-                logger.error("Invalid JSON received from WebSocket")
-            except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
-                    
-    except websockets.exceptions.ConnectionClosed:
-        logger.info("WebSocket connection closed")
-    except Exception as e:
-        logger.error(f"WebSocket handler error: {e}")
-    finally:
-        # Clean up
-        logger.info("Cleaning up WebSocket connection")
-        if stream_manager:
-            stream_manager.close()
-        if forward_task and not forward_task.done():
-            forward_task.cancel()
-        logger.info("WebSocket connection cleanup complete")
+# Session / conversation history settings
+SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "sessions")
+MAX_HISTORY_MESSAGES = 20  # Keep last 20 messages (10 turns) to avoid token bloat
 
-async def forward_responses(websocket, stream_manager):
-    """Forward responses from Bedrock to the WebSocket - simplified version"""
-    try:
-        while stream_manager.is_active:
-            # Get next response from the output queue
-            response = await stream_manager.output_queue.get()
-            
-            # Send to WebSocket
-            try:
-                event = json.dumps(response)
-                await websocket.send(event)
-            except websockets.exceptions.ConnectionClosed:
-                logger.info("WebSocket connection closed during response forwarding")
-                break
-            except Exception as send_error:
-                logger.error(f"Error sending response to WebSocket: {send_error}")
-                break
-                
-    except asyncio.CancelledError:
-        logger.info("Response forwarding task cancelled")
-    except Exception as e:
-        logger.error(f"Error forwarding responses: {e}")
-    finally:
-        logger.info("Response forwarding stopped")
 
-async def main(host, port, config):
-    """Main function to run the WebSocket server"""
-    try:
-        # Start WebSocket server
-        async with websockets.serve(
-            lambda ws, path: websocket_handler(ws, path, config),
-            host,
-            port
-        ):
-            logger.info(f"Simple WebSocket server started at {host}:{port}")
-            
-            # Keep the server running forever
-            await asyncio.Future()
-    except Exception as e:
-        logger.error(f"Failed to start WebSocket server: {e}")
+def build_system_prompt() -> str:
+    """Build the consolidated system prompt for the BidiAgent.
 
-async def run_server(profile_name=None, region=None, host="localhost", port=80):
-    """Run the simple WebSocket server"""
-    # Create agent configuration
+    Merges instructions from the former EC2Agent, SSMAgent, and BackupAgent
+    prompts, the dangerous-operation consent protocol, voice output guidelines,
+    and non-AWS query rejection instructions into a single prompt.
+    """
+    consent_protocol = get_consent_instructions()
+
+    return f"""You are a specialized AWS voice assistant. You help users manage their AWS infrastructure using the use_aws tool. You handle EC2, Systems Manager (SSM), and AWS Backup operations directly.
+
+AWS EC2 CAPABILITIES:
+- List and describe EC2 instances, AMIs, security groups, and VPCs
+- Start, stop, and reboot instances
+- Get instance status and health checks
+- Manage security groups and key pairs
+- Provide cost and performance insights
+
+AWS SYSTEMS MANAGER (SSM) CAPABILITIES:
+- Run commands on EC2 instances via SSM
+- Manage SSM documents and parameters
+- Handle patch management and compliance
+- Install and configure software (e.g. CloudWatch agent)
+- Session Manager operations
+- Inventory management
+
+AWS BACKUP CAPABILITIES:
+- List and manage backup jobs, plans, and vaults
+- Monitor backup status and health
+- Handle restore operations
+- Manage backup policies and schedules
+- Cost optimization for backups
+- Compliance and reporting
+
+TOOL USAGE:
+- Use the use_aws tool to make AWS CLI API calls for all services above
+- Use appropriate AWS regions (default: us-east-1)
+- Handle errors gracefully and suggest alternatives
+- Ask for clarification if the request is ambiguous
+
+{consent_protocol}
+
+VOICE OUTPUT GUIDELINES:
+- Keep responses concise and conversational — they will be spoken aloud
+- Do NOT use markdown formatting (no bullet points, headers, bold, code blocks, or tables)
+- Avoid long lists; summarize when possible and offer to provide details if needed
+- Use natural, spoken language suitable for text-to-speech output
+- Spell out abbreviations on first use when they may be unclear in speech
+
+NON-AWS QUERY HANDLING:
+- You ONLY handle AWS-related queries (EC2, SSM, Backup, and related services)
+- If a user asks about non-AWS topics, respond: "I'm an AWS voice assistant and can only help with AWS services like EC2, Systems Manager, and Backup. Please ask me about your AWS infrastructure."
+- Politely redirect non-AWS conversations back to AWS topics"""
+
+
+
+async def websocket_handler(websocket, path, profile_name, region):
+    """Handle a single WebSocket connection with a BidiAgent session.
+
+    1. Waits for an optional ``config`` message to extract voice_id and session_id.
+    2. Creates the BidiAgent with use_aws, consolidated system prompt, and session manager.
+    3. Runs the agent with WebSocket-bridged I/O channels.
+    4. Ensures cleanup on completion or error.
+    """
+    logger.info("New WebSocket connection from %s", websocket.remote_address)
+
+    voice_id = "matthew"
+    session_id = None
+
+    # Wait for optional config message from frontend
+    try:
+        first_msg = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+        data = json.loads(first_msg)
+        if data.get("type") == "config":
+            voice_id = data.get("voice_id", "matthew")
+            session_id = data.get("session_id")
+            logger.info("Received config: voice_id=%s, session_id=%s", voice_id, session_id)
+    except (asyncio.TimeoutError, json.JSONDecodeError):
+        logger.info("No config message received, using default voice_id=%s", voice_id)
+
+    # Generate a session ID if the frontend didn't provide one
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    # Ensure use_aws tool operates without interactive prompts
+    os.environ["BYPASS_TOOL_CONSENT"] = "true"
+
     config = AgentConfig(
         profile_name=profile_name,
-        region=region or "us-east-1"
+        region=region or "us-east-1",
+        voice_id=voice_id,
     )
-    
-    # Ensure AWS credentials are available
-    session = get_aws_session(config.profile_name)
-    if not session:
-        logger.error("Failed to get AWS session. Check your credentials.")
-        return
-    
-    try:
-        await main(host, port, config)
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Server error: {e}")
+    model = create_bidi_model(config)
+    system_prompt = build_system_prompt()
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Simple Nova S2S WebSocket Server")
-    parser.add_argument("--profile", help="AWS profile name")
-    parser.add_argument("--region", default="us-east-1", help="AWS region")
-    parser.add_argument("--host", default="localhost", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=80, help="Port to bind to")
-    
-    args = parser.parse_args()
-    
-    asyncio.run(run_server(
-        profile_name=args.profile,
-        region=args.region,
-        host=args.host,
-        port=args.port
-    ))
+    # Set up file-based session manager for conversation persistence
+    session_manager = FileSessionManager(
+        session_id=session_id,
+        storage_dir=os.path.abspath(SESSIONS_DIR),
+    )
+
+    agent = BidiAgent(
+        model=model,
+        tools=[use_aws],
+        system_prompt=system_prompt,
+        session_manager=session_manager,
+    )
+
+    # Trim history if it grew too large from a previous session
+    if len(agent.messages) > MAX_HISTORY_MESSAGES:
+        agent.messages = agent.messages[-MAX_HISTORY_MESSAGES:]
+        logger.info("Trimmed conversation history to last %d messages", MAX_HISTORY_MESSAGES)
+
+    bidi_input = WebSocketBidiInput(websocket)
+    bidi_output = WebSocketBidiOutput(websocket)
+
+    # Auto-reconnect loop: Nova Sonic has a 10-minute (600s) max audio stream length.
+    # When that limit is hit, we tear down the agent and create a fresh one that
+    # inherits the conversation history via the session manager.
+    MAX_RETRIES = 50  # ~8 hours of continuous conversation
+    for attempt in range(MAX_RETRIES):
+        try:
+            await agent.run(inputs=[bidi_input], outputs=[bidi_output])
+            break  # clean exit (user closed session)
+        except Exception as e:
+            is_stream_limit = "audio stream length exceeded" in str(e)
+            if is_stream_limit and attempt < MAX_RETRIES - 1:
+                logger.info("Audio stream limit reached, reconnecting (attempt %d)...", attempt + 1)
+                try:
+                    restart_msg = {"type": "bidi_connection_restart"}
+                    await websocket.send(json.dumps(restart_msg))
+                except Exception:
+                    pass
+
+                # Create a fresh model + agent, keeping the same session manager
+                # so conversation history carries over automatically
+                model = create_bidi_model(config)
+                agent = BidiAgent(
+                    model=model,
+                    tools=[use_aws],
+                    system_prompt=system_prompt,
+                    session_manager=session_manager,
+                )
+                if len(agent.messages) > MAX_HISTORY_MESSAGES:
+                    agent.messages = agent.messages[-MAX_HISTORY_MESSAGES:]
+                continue
+            else:
+                logger.error("BidiAgent error: %s", e, exc_info=True)
+                try:
+                    error_msg = {"type": "bidi_error", "message": str(e)}
+                    await websocket.send(json.dumps(error_msg))
+                except Exception:
+                    logger.warning("Failed to send error event to frontend")
+                break
+
+    logger.info("Cleaning up BidiAgent session")
+    await bidi_input.stop()
+    await bidi_output.stop()
+    logger.info("BidiAgent session cleanup complete")
+
+
+async def run_server(profile_name=None, region=None, host="localhost", port=80):
+    """Start the WebSocket server for BidiAgent voice sessions."""
+    async with websockets.serve(
+        lambda ws, path: websocket_handler(ws, path, profile_name, region),
+        host,
+        port,
+    ):
+        logger.info("BidiAgent WebSocket server started at %s:%s", host, port)
+        await asyncio.Future()  # run forever

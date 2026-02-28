@@ -1,13 +1,13 @@
 # AWS Strands Nova Voice Assistant
 
-A sophisticated voice-based AI assistant using AWS Strands for multi-agent collaboration to interact with AWS services. The system features real-time voice interaction through Amazon Nova Sonic and intelligent routing between specialized AWS agents.
+A voice-based AI assistant using Strands Agents' BidiAgent to interact with AWS services. The system uses a single bidirectional stream through Amazon Nova Sonic for speech-to-text, tool execution, and text-to-speech — all in one hop.
 
 ## 🚀 Features
 
-- **Voice Interface**: Real-time voice input/output using Amazon Nova Sonic
-- **Multi-Agent Architecture**: Supervisor agent coordinates between specialized agents
-- **AWS Service Integration**: Comprehensive support for EC2, SSM, and AWS Backup operations
-- **Intelligent Routing**: Automatic query routing to appropriate specialized agents
+- **Voice Interface**: Real-time bidirectional voice I/O using Amazon Nova Sonic via BidiAgent
+- **Single-Hop Architecture**: One BidiAgent handles speech, reasoning, and tool execution — no intermediate LLM routing
+- **AWS Service Integration**: EC2, SSM, and AWS Backup operations via the `use_aws` tool
+- **Session Persistence**: Conversation history preserved across stream reconnections using file-based session management
 - **Professional UI**: AWS Cloudscape Design components with chat bubbles and event display
 
 ## Authors and acknowledgment
@@ -23,27 +23,27 @@ We would like to thank the following contributors for their valuable input and w
 
 ## 🏗️ Architecture
 
-The system implements a simplified multi-agent architecture:
+The system uses a single-hop BidiAgent architecture. The frontend sends audio over WebSocket to the backend, which bridges it to a BidiAgent. The BidiAgent handles speech-to-text, reasoning, tool execution (via `use_aws`), and text-to-speech in one bidirectional Nova Sonic stream.
 
-![Architecture Diagram](diagrams/strands-arch.svg)
+```
+Browser ↔ WebSocket ↔ WebSocketBidiInput/Output ↔ BidiAgent (Nova Sonic) ↔ use_aws ↔ AWS APIs
+```
 
 ### Core Components
 
-1. **Supervisor Agent**: Routes queries to specialized AWS agents
-2. **Specialized Agents**:
-   - **EC2 Agent**: Instance management, status checks, and operations
-   - **SSM Agent**: Systems Manager operations, command execution, patch management
-   - **Backup Agent**: AWS Backup configuration, job monitoring, and management
-3. **Voice Integration**: Amazon Nova Sonic for speech-to-text and text-to-speech
-4. **WebSocket Server**: Real-time communication between frontend and backend
+1. **BidiAgent**: Strands Agents' `BidiAgent` with `BidiNovaSonicModel` — handles the full voice pipeline in a single stream
+2. **WebSocket I/O Channels**: Custom `WebSocketBidiInput` and `WebSocketBidiOutput` classes bridge the frontend WebSocket to BidiAgent's input/output protocols
+3. **use_aws Tool**: Strands tool for executing AWS CLI API calls (EC2, SSM, Backup)
+4. **WebSocket Server**: Manages connections, session persistence, and auto-reconnection on Nova Sonic stream timeouts
+5. **React Frontend**: Cloudscape UI with voice capture, audio playback, transcript display, and event monitoring
 
 ### Technology Stack
 
-- **Backend**: Python 3.12+ with AWS Strands framework
+- **Backend**: Python 3.12+ with Strands Agents (`strands-agents[bidi]`)
 - **Frontend**: React with AWS Cloudscape Design components
-- **AI Models**: AWS Bedrock Claude 3 Haiku for all agents
-- **Voice Processing**: Amazon Nova Sonic for audio I/O
-- **Package Management**: Standard pip with requirements.txt
+- **Voice Model**: Amazon Nova Sonic (`amazon.nova-2-sonic-v1:0`) via BidiNovaSonicModel
+- **Tool Execution**: `use_aws` from `strands-agents-tools`
+- **Package Management**: uv with pyproject.toml
 
 ## 📁 Project Structure
 
@@ -52,30 +52,24 @@ aws-strands-nova-voice-assistant/
 ├── backend/                           # Backend Python application
 │   ├── src/
 │   │   └── voice_based_aws_agent/
-│   │       ├── agents/                # Multi-agent system
-│   │       │   ├── orchestrator.py    # Central agent coordinator
-│   │       │   ├── supervisor_agent.py # Query routing agent
-│   │       │   ├── ec2_agent.py       # EC2 operations specialist
-│   │       │   ├── ssm_agent.py       # SSM operations specialist
-│   │       │   └── backup_agent.py    # Backup operations specialist
 │   │       ├── config/                # Configuration management
+│   │       │   └── config.py          # AgentConfig & BidiNovaSonicModel factory
 │   │       ├── utils/
 │   │       │   ├── aws_auth.py        # AWS authentication
-│   │       │   └── voice_integration/ # Nova Sonic integration
-│   │       │       ├── server.py      # WebSocket server
-│   │       │       ├── s2s_session_manager.py # Stream management
-│   │       │       └── supervisor_agent_integration.py # Agent bridge
-│   │       └── main.py                # Application entry point
-│   └── tools/                         # Strands tools
-│       └── supervisor_tool.py         # Supervisor agent tool integration
+│   │       │   ├── prompt_consent.py  # Dangerous operation consent protocol
+│   │       │   └── voice_integration/ # BidiAgent integration
+│   │       │       ├── server.py      # WebSocket server & BidiAgent lifecycle
+│   │       │       └── bidi_channels.py # WebSocket ↔ BidiAgent I/O bridges
+│   │       └── main.py                # CLI entry point
 ├── frontend/                          # React web interface
 │   ├── src/
 │   │   ├── components/                # React components
-│   │   ├── helper/                    # Audio processing utilities
+│   │   ├── helper/                    # Audio processing & BidiAgent event helpers
+│   │   │   └── BidiEventHelpers.js   # Frontend ↔ BidiAgent event protocol
 │   │   ├── App.js                     # Main React application
 │   │   └── VoiceAgent.js              # Voice interface component
 │   └── package.json                   # Node.js dependencies
-├── requirements.txt                   # Python dependencies
+├── pyproject.toml                     # Python project & dependencies
 ├── run_backend.sh                     # Backend startup script
 ├── run_frontend.sh                    # Frontend startup script
 └── README.md                          # This file
@@ -90,10 +84,6 @@ Running this voice-driven AWS assistant involves several AWS services with usage
 - **Speech output tokens**: $0.0136 per 1K tokens  
 - **Text input tokens**: $0.00006 per 1K tokens
 - **Text output tokens**: $0.00024 per 1K tokens
-
-### AWS Bedrock Claude 3 Haiku
-- **Input tokens**: $0.00025 per 1K tokens
-- **Output tokens**: $0.00025 per 1K tokens
 
 ### Supporting AWS Services
 
@@ -131,9 +121,9 @@ Running this voice-driven AWS assistant involves several AWS services with usage
 ### Cost Optimization Features
 
 The solution includes several built-in cost controls:
-- **Voice response truncation**: Limited to 800 characters to reduce token usage
-- **Efficient agent routing**: Minimizes unnecessary LLM calls
-- **Conversation management**: Sliding window to control context size
+- **Single-hop architecture**: Eliminates intermediate LLM calls (no more Claude Haiku routing hops)
+- **Conversation management**: Sliding window limits context size to last 20 messages
+- **Voice-optimized prompts**: Concise responses suitable for speech output
 - **Free tier utilization**: Leverages AWS free tier services where available
 
 ### Cost Factors That Impact Pricing
@@ -161,11 +151,10 @@ For production deployments, additional costs may include:
 
 ## 🛠️ Prerequisites
 
-- **Python 3.12+** with pip
+- **Python 3.12+** with [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - **Node.js 16+** and npm
 - **AWS Account** with access to:
-  - AWS Bedrock (Claude 3 Haiku model)
-  - Amazon Nova Sonic
+  - Amazon Bedrock (Nova Sonic model)
   - EC2, SSM, and AWS Backup services
 - **AWS CLI** configured with appropriate credentials
 - **Audio hardware** (microphone and speakers for voice mode)
@@ -180,14 +169,9 @@ For production deployments, additional costs may include:
 git clone https://github.com/aws-samples/sample-aws-strands-nova-voice-assistant.git
 cd sample-aws-strands-nova-voice-assistant
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Unix/macOS
-# or
-.venv\Scripts\activate  # On Windows
-
-# Install Python dependencies
-pip install -r requirements.txt
+# Install uv if you don't have it (see https://docs.astral.sh/uv/getting-started/installation/)
+# Then sync dependencies (creates .venv automatically)
+uv sync
 ```
 
 ### Step 2: Configure AWS Service Authentication
@@ -399,19 +383,21 @@ The system supports multiple voice options for text-to-speech:
 
 ## 🎯 Supported Operations
 
-### EC2 Agent
+The BidiAgent handles all AWS operations directly via the `use_aws` tool:
+
+### EC2
 - List and describe EC2 instances
 - Start, stop, and reboot instances
 - Instance status monitoring
 - Security group and VPC information
 
-### SSM Agent
+### Systems Manager (SSM)
 - Execute commands on instances
 - Patch management operations
 - Parameter Store interactions
 - Session Manager connections
 
-### Backup Agent
+### AWS Backup
 - List backup jobs and vaults
 - Configure backup plans
 - Monitor backup status
@@ -446,15 +432,16 @@ If you encounter issues during setup or operation, these common solutions can he
 ## 🔧 Development Notes
 
 ### Architecture Design
-- **Simple session management** without complex recovery mechanisms
-- **Basic WebSocket server** without automatic reconnection loops
-- **Straightforward tool processing** with the supervisor agent
-- **Clean error handling** that asks users to restart rather than automatic recovery
+- **Single-hop BidiAgent**: One agent handles speech, reasoning, and tool execution — no multi-agent routing
+- **WebSocket I/O bridges**: Custom `WebSocketBidiInput`/`WebSocketBidiOutput` channels connect the frontend to BidiAgent
+- **Auto-reconnection**: Nova Sonic has a ~10-minute stream limit; the server automatically reconnects with conversation history preserved
+- **Session persistence**: File-based session manager keeps conversation history across reconnections
 
 ### Key Design Decisions
-- **Single Tool**: Uses one `supervisorAgent` tool that routes to specialized agents
-- **Voice Optimization**: Responses truncated to 800 characters for better voice experience
-- **User-Controlled Recovery**: When errors occur, users manually restart conversations
+- **Single Tool (`use_aws`)**: BidiAgent calls AWS APIs directly, eliminating the supervisor/specialized agent routing layer
+- **Voice-first prompts**: System prompt optimized for spoken output (no markdown, concise responses)
+- **Dangerous operation consent**: Built-in consent protocol requires user confirmation before destructive AWS operations
+- **User-Controlled Recovery**: On errors, users see an alert banner with a "Restart Conversation" option
 
 ## 📄 License
 
