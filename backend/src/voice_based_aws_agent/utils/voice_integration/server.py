@@ -148,7 +148,11 @@ async def websocket_handler(websocket, path, profile_name, region):
     # Trim history if it grew too large from a previous session
     if len(agent.messages) > MAX_HISTORY_MESSAGES:
         agent.messages = agent.messages[-MAX_HISTORY_MESSAGES:]
-        logger.info("Trimmed conversation history to last %d messages", MAX_HISTORY_MESSAGES)
+        # Ensure the first message is from the user — the model rejects
+        # histories that start with an assistant message.
+        while agent.messages and agent.messages[0].get("role") == "assistant":
+            agent.messages.pop(0)
+        logger.info("Trimmed conversation history to %d messages", len(agent.messages))
 
     bidi_input = WebSocketBidiInput(websocket)
     bidi_output = WebSocketBidiOutput(websocket)
@@ -182,6 +186,8 @@ async def websocket_handler(websocket, path, profile_name, region):
                 )
                 if len(agent.messages) > MAX_HISTORY_MESSAGES:
                     agent.messages = agent.messages[-MAX_HISTORY_MESSAGES:]
+                    while agent.messages and agent.messages[0].get("role") == "assistant":
+                        agent.messages.pop(0)
                 continue
             else:
                 logger.error("BidiAgent error: %s", e, exc_info=True)
